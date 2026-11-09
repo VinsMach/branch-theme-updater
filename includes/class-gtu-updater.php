@@ -1,9 +1,9 @@
 <?php
 /**
- * Hooking nel sistema nativo di aggiornamenti di WordPress per i temi.
+ * Hooking nel sistema nativo di aggiornamenti di WordPress per un tema o un plugin.
  *
  * Strategia (nessuna release necessaria):
- *  1. pre_set_site_transient_update_themes
+ *  1. pre_set_site_transient_update_themes / pre_set_site_transient_update_plugins
  *     → chiama /repos/{owner}/{repo}/commits/{branch} per ottenere il commit SHA
  *     → se il SHA è diverso dall'ultimo installato, propone aggiornamento
  *  2. http_request_args
@@ -34,6 +34,7 @@ class GTU_Updater {
         add_action( 'update_option_' . GTU_OPTION_KEY, [ $this, 'reload_opts' ] );
 
         add_filter( 'pre_set_site_transient_update_themes', [ $this, 'check_for_update' ], 100 );
+        add_filter( 'pre_set_site_transient_update_plugins', [ $this, 'check_for_plugin_update' ], 100 );
         add_filter( 'http_request_args',                   [ $this, 'inject_auth_header' ], 10, 2 );
         add_filter( 'upgrader_source_selection',           [ $this, 'fix_zipball_source' ], 10, 4 );
         add_filter( 'upgrader_package_options',            [ $this, 'allow_theme_overwrite' ], 10, 1 );
@@ -50,6 +51,10 @@ class GTU_Updater {
 
     public function check_for_update( $transient ) {
         if ( empty( $transient->checked ) ) {
+            return $transient;
+        }
+
+        if ( 'theme' !== gtu_package_type( $this->opts ) ) {
             return $transient;
         }
 
@@ -92,6 +97,51 @@ class GTU_Updater {
             ];
         } else {
             unset( $transient->response[ $theme_slug ] );
+        }
+
+        return $transient;
+    }
+
+    public function check_for_plugin_update( $transient ) {
+        if ( ! is_object( $transient ) || 'plugin' !== gtu_package_type( $this->opts ) ) {
+            return $transient;
+        }
+
+        $opts        = $this->opts;
+        $plugin_file = gtu_plugin_file( $opts );
+        $owner       = $opts['repo_owner'] ?? '';
+        $repo        = $opts['repo_name'] ?? '';
+        $branch      = $opts['repo_branch'] ?? 'main';
+
+        if ( '' === $plugin_file || '' === $owner || '' === $repo || empty( $transient->checked ) || ! is_array( $transient->checked ) ) {
+            return $transient;
+        }
+        if ( ! isset( $transient->checked[ $plugin_file ] ) ) {
+            return $transient;
+        }
+
+        $remote_sha = $this->fetch_branch_sha( $opts, $branch );
+        if ( ! $remote_sha ) {
+            return $transient;
+        }
+
+        $version = $transient->checked[ $plugin_file ];
+        if ( ! is_string( $version ) || '' === $version ) {
+            $version = '0';
+        }
+
+        $stored = get_option( 'gtu_installed_sha_' . gtu_target_id( $opts ), '' );
+
+        if ( $remote_sha !== $stored ) {
+            $transient->response[ $plugin_file ] = (object) [
+                'slug'        => gtu_plugin_folder( $plugin_file ),
+                'plugin'      => $plugin_file,
+                'new_version' => $version . '+git.' . substr( $remote_sha, 0, 7 ),
+                'url'         => gtu_repo_tree_url( $owner, $repo, $branch ),
+                'package'     => gtu_remote_api( $owner, $repo, 'zipball/' . rawurlencode( $branch ) ),
+            ];
+        } else {
+            unset( $transient->response[ $plugin_file ] );
         }
 
         return $transient;
@@ -147,7 +197,8 @@ class GTU_Updater {
      */
     public function download_zipball( array $opts, string $branch ): ?string {
         $url  = gtu_remote_api( $opts['repo_owner'], $opts['repo_name'], 'zipball/' . rawurlencode( $branch ) );
-        $dest = get_temp_dir() . 'gtu-' . $opts['theme_slug'] . '-' . time() . '.zip';
+        $id   = gtu_target_id( $opts );
+        $dest = get_temp_dir() . 'gtu-' . sanitize_file_name( '' !== $id ? $id : 'package' ) . '-' . time() . '.zip';
         $fetched = gtu_fetch_zip( $url, $opts, $dest );
 
         if ( is_wp_error( $fetched ) ) {
@@ -164,18 +215,33 @@ class GTU_Updater {
      * Qui rinominiamo la sorgente PRIMA della validazione/installazione.
      */
     public function fix_zipball_source( $source, $remote_source, $upgrader, $hook_extra ) {
-        $opts       = $this->opts;
-        $theme_slug = $opts['theme_slug'] ?? '';
+        $opts = $this->opts;
 
-        if ( ! $theme_slug || empty( $opts['repo_owner'] ) || empty( $opts['repo_name'] ) ) {
+        if ( empty( $opts['repo_owner'] ) || empty( $opts['repo_name'] ) || ! is_dir( $source ) ) {
+            return $source;
+        }
+
+        if ( 'plugin' === gtu_package_type( $opts ) ) {
+            $plugin_file = gtu_plugin_file( $opts );
+            $folder      = gtu_plugin_folder( $plugin_file );
+            if ( '' === $folder || ! $this->hook_targets_plugin( $hook_extra, $plugin_file ) ) {
+                return $source;
+            }
+
+            $package_root = gtu_find_plugin_source_dir( $source, $plugin_file );
+            if ( ! $package_root || ! $this->looks_like_zipball( $package_root, $opts ) ) {
+                return $source;
+            }
+
+            return $this->rename_source_folder( $package_root, $remote_source, $folder );
+        }
+
+        $theme_slug = $opts['theme_slug'] ?? '';
+        if ( ! $theme_slug ) {
             return $source;
         }
 
         if ( empty( $hook_extra['theme'] ) && empty( $hook_extra['themes'] ) && empty( $hook_extra['type'] ) ) {
-            return $source;
-        }
-
-        if ( ! is_dir( $source ) ) {
             return $source;
         }
 
@@ -184,32 +250,11 @@ class GTU_Updater {
             return $source;
         }
 
-        $basename = basename( untrailingslashit( $source ) );
-        if ( $basename === $theme_slug ) {
+        if ( ! $this->looks_like_zipball( $source, $opts ) && basename( untrailingslashit( $source ) ) !== $theme_slug ) {
             return $source;
         }
 
-        $owner  = strtolower( $opts['repo_owner'] );
-        $repo   = strtolower( $opts['repo_name'] );
-        $prefix = strtolower( $owner . '-' . $repo . '-' );
-
-        // Evita di toccare pacchetti non provenienti da questo repository.
-        if ( strpos( strtolower( $basename ), $prefix ) !== 0 ) {
-            return $source;
-        }
-
-        global $wp_filesystem;
-        $target = trailingslashit( $remote_source ) . $theme_slug;
-
-        if ( $wp_filesystem && $wp_filesystem->exists( $target ) ) {
-            $wp_filesystem->delete( $target, true );
-        }
-
-        if ( $wp_filesystem && $wp_filesystem->move( $source, $target, true ) ) {
-            return $target;
-        }
-
-        return $source;
+        return $this->rename_source_folder( $source, $remote_source, $theme_slug );
     }
 
 
@@ -221,13 +266,23 @@ class GTU_Updater {
      */
     public function allow_theme_overwrite( array $options ): array {
         $opts       = $this->opts;
+        $hook_extra = $options['hook_extra'] ?? [];
+
+        if ( 'plugin' === gtu_package_type( $opts ) ) {
+            $plugin_file = gtu_plugin_file( $opts );
+            if ( '' !== $plugin_file && $this->hook_targets_plugin( $hook_extra, $plugin_file ) ) {
+                $options['clear_destination']           = true;
+                $options['abort_if_destination_exists'] = false;
+            }
+            return $options;
+        }
+
         $theme_slug = $opts['theme_slug'] ?? '';
 
         if ( ! $theme_slug ) {
             return $options;
         }
 
-        $hook_extra = $options['hook_extra'] ?? [];
         $is_target_theme = false;
 
         if ( isset( $hook_extra['theme'] ) && $hook_extra['theme'] === $theme_slug ) {
@@ -252,11 +307,23 @@ class GTU_Updater {
     /* ------------------------------------------------------------------ */
 
     public function after_upgrade( WP_Upgrader $upgrader, array $hook_extra ): void {
+        $opts = $this->opts;
+
+        if ( 'plugin' === gtu_package_type( $opts ) ) {
+            $plugin_file = gtu_plugin_file( $opts );
+            if ( '' === $plugin_file || ! $this->hook_targets_plugin( $hook_extra, $plugin_file ) ) {
+                return;
+            }
+
+            $this->rename_extracted_plugin( $opts, $plugin_file );
+            $this->remember_sha( $opts );
+            return;
+        }
+
         if ( empty( $hook_extra['themes'] ) ) {
             return;
         }
 
-        $opts       = $this->opts;
         $theme_slug = $opts['theme_slug'] ?? '';
 
         if ( ! in_array( $theme_slug, (array) $hook_extra['themes'], true ) ) {
@@ -264,16 +331,7 @@ class GTU_Updater {
         }
 
         $this->rename_extracted_folder( $opts, $theme_slug );
-
-        // Salva il SHA appena installato per il confronto futuro
-        $branch = $opts['repo_branch'] ?? 'main';
-        $sha    = $this->fetch_branch_sha( $opts, $branch );
-        if ( $sha ) {
-            update_option( 'gtu_installed_sha_' . $theme_slug, $sha );
-        }
-
-        $cache_key = 'gtu_branch_sha_' . md5( $opts['repo_owner'] . $opts['repo_name'] . $branch );
-        delete_transient( $cache_key );
+        $this->remember_sha( $opts );
     }
 
     /* ------------------------------------------------------------------ */
@@ -303,6 +361,85 @@ class GTU_Updater {
                     if ( get_option( 'stylesheet' ) === $theme_slug || get_option( 'template' ) === $theme_slug ) {
                         switch_theme( $theme_slug );
                     }
+                }
+                break;
+            }
+        }
+    }
+
+    public function remember_sha( array $opts ): ?string {
+        $branch = $opts['repo_branch'] ?? 'main';
+        $sha    = $this->fetch_branch_sha( $opts, $branch );
+        $id     = gtu_target_id( $opts );
+        if ( $sha && '' !== $id ) {
+            update_option( 'gtu_installed_sha_' . $id, $sha );
+        }
+
+        $cache_key = 'gtu_branch_sha_' . md5( ( $opts['repo_owner'] ?? '' ) . ( $opts['repo_name'] ?? '' ) . $branch );
+        delete_transient( $cache_key );
+
+        return $sha ?: null;
+    }
+
+    private function hook_targets_plugin( array $hook_extra, string $plugin_file ): bool {
+        if ( isset( $hook_extra['plugin'] ) && $hook_extra['plugin'] === $plugin_file ) {
+            return true;
+        }
+
+        return isset( $hook_extra['plugins'] ) && in_array( $plugin_file, (array) $hook_extra['plugins'], true );
+    }
+
+    private function looks_like_zipball( string $path, array $opts ): bool {
+        $prefix = strtolower( $opts['repo_owner'] . '-' . $opts['repo_name'] . '-' );
+        $base   = strtolower( basename( untrailingslashit( $path ) ) );
+        $parent = strtolower( basename( dirname( untrailingslashit( $path ) ) ) );
+
+        if ( 0 === strpos( $base, $prefix ) || 0 === strpos( $parent, $prefix ) ) {
+            return true;
+        }
+
+        return $base === strtolower( (string) ( 'plugin' === gtu_package_type( $opts ) ? gtu_plugin_folder( gtu_plugin_file( $opts ) ) : ( $opts['theme_slug'] ?? '' ) ) );
+    }
+
+    private function rename_source_folder( string $source, $remote_source, string $folder ) {
+        $basename = basename( untrailingslashit( $source ) );
+        if ( $basename === $folder ) {
+            return $source;
+        }
+
+        global $wp_filesystem;
+        $target = trailingslashit( $remote_source ) . $folder;
+
+        if ( $wp_filesystem && $wp_filesystem->exists( $target ) ) {
+            $wp_filesystem->delete( $target, true );
+        }
+
+        if ( $wp_filesystem && $wp_filesystem->move( $source, $target, true ) ) {
+            return $target;
+        }
+
+        return $source;
+    }
+
+    private function rename_extracted_plugin( array $opts, string $plugin_file ): void {
+        $folder       = gtu_plugin_folder( $plugin_file );
+        $plugins_dir  = WP_PLUGIN_DIR;
+        $expected_dir = $plugins_dir . '/' . $folder;
+
+        if ( '' === $folder || is_dir( $expected_dir ) ) {
+            return;
+        }
+
+        $prefix   = strtolower( ( $opts['repo_owner'] ?? '' ) . '-' . ( $opts['repo_name'] ?? '' ) . '-' );
+        $iterator = new DirectoryIterator( $plugins_dir );
+        foreach ( $iterator as $item ) {
+            if ( $item->isDot() || ! $item->isDir() ) {
+                continue;
+            }
+            if ( 0 === strpos( strtolower( $item->getFilename() ), $prefix ) ) {
+                $fs = gtu_filesystem();
+                if ( $fs ) {
+                    $fs->move( $item->getPathname(), $expected_dir, true );
                 }
                 break;
             }

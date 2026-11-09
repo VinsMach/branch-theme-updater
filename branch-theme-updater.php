@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name:       Branch Theme Updater
+ * Plugin Name:       Branch Theme/Plugin Updater
  * Plugin URI:        https://wordpress.org/plugins/branch-theme-updater/
- * Description:       Aggiorna qualsiasi tema WordPress da un repository remoto, pubblico o privato, con gli aggiornamenti nativi di WordPress.
- * Version:           1.1.0
+ * Description:       Aggiorna un tema oppure un plugin dal branch di un repository, con la schermata Aggiornamenti di WordPress. I repository pubblici non richiedono un token.
+ * Version:           1.2.0
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Author:            mesciu
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'GTU_VERSION',     '1.1.0' );
+define( 'GTU_VERSION',     '1.2.0' );
 define( 'GTU_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'GTU_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'GTU_OPTION_KEY',  'gtu_settings' );
@@ -30,13 +30,15 @@ define( 'GTU_OPTION_KEY',  'gtu_settings' );
  */
 function gtu_default_settings(): array {
     return [
-        'theme_slug'    => '',
-        'repo_url'    => '',
-        'repo_owner'  => '',
-        'repo_name'   => '',
-        'repo_branch' => 'main',
-        'repo_token'  => '',
-        'user_agent'    => '',
+        'package_type' => 'theme',
+        'theme_slug'   => '',
+        'plugin_file'  => '',
+        'repo_url'     => '',
+        'repo_owner'   => '',
+        'repo_name'    => '',
+        'repo_branch'  => 'main',
+        'repo_token'   => '',
+        'user_agent'   => '',
     ];
 }
 
@@ -50,6 +52,79 @@ function gtu_get_settings(): array {
     }
 
     return array_merge( gtu_default_settings(), $saved );
+}
+
+function gtu_package_type( array $opts ): string {
+    return ( isset( $opts['package_type'] ) && 'plugin' === $opts['package_type'] ) ? 'plugin' : 'theme';
+}
+
+function gtu_plugin_file( array $opts ): string {
+    $file = isset( $opts['plugin_file'] ) ? str_replace( '\\', '/', (string) $opts['plugin_file'] ) : '';
+    $file = trim( $file, '/' );
+    if ( '' === $file || false !== strpos( $file, '..' ) ) {
+        return '';
+    }
+    if ( ! preg_match( '#^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\.php$#', $file ) ) {
+        return '';
+    }
+
+    return $file;
+}
+
+function gtu_plugin_folder( string $plugin_file ): string {
+    $slash = strpos( $plugin_file, '/' );
+    if ( false === $slash ) {
+        return '';
+    }
+
+    return substr( $plugin_file, 0, $slash );
+}
+
+function gtu_is_this_plugin( string $plugin_file ): bool {
+    return $plugin_file === plugin_basename( GTU_PLUGIN_DIR . 'branch-theme-updater.php' );
+}
+
+function gtu_target_id( array $opts ): string {
+    if ( 'plugin' === gtu_package_type( $opts ) ) {
+        return 'plugin_' . gtu_plugin_folder( gtu_plugin_file( $opts ) );
+    }
+
+    return (string) ( $opts['theme_slug'] ?? '' );
+}
+
+function gtu_target_ready( array $opts ): bool {
+    if ( empty( $opts['repo_owner'] ) || empty( $opts['repo_name'] ) ) {
+        return false;
+    }
+    if ( 'plugin' === gtu_package_type( $opts ) ) {
+        return '' !== gtu_plugin_file( $opts );
+    }
+
+    return '' !== ( $opts['theme_slug'] ?? '' );
+}
+
+function gtu_find_plugin_source_dir( string $dir, string $plugin_file ): ?string {
+    $main = basename( $plugin_file );
+    if ( is_file( trailingslashit( $dir ) . $main ) ) {
+        return $dir;
+    }
+
+    $items = scandir( $dir );
+    if ( ! is_array( $items ) ) {
+        return null;
+    }
+
+    foreach ( $items as $item ) {
+        if ( '.' === $item || '..' === $item ) {
+            continue;
+        }
+        $candidate = $dir . '/' . $item;
+        if ( is_dir( $candidate ) && is_file( trailingslashit( $candidate ) . $main ) ) {
+            return $candidate;
+        }
+    }
+
+    return null;
 }
 
 function gtu_remote_api( string $owner, string $repo, string $path = '' ): string {

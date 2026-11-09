@@ -1,105 +1,107 @@
-=== Branch Theme Updater ===
+=== Branch Theme/Plugin Updater ===
 Contributors: mesciu
-Tags: theme, updater, updates, branch
+Tags: theme, plugin, updater, updates, branch
 Requires at least: 5.8
 Tested up to: 7.1
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Update any WordPress theme from a public or private GitHub branch, using the updates screen WordPress already has.
+Update one theme or one plugin from a GitHub branch. WordPress offers it on the updates screen you already use.
 
 == Description ==
 
-**Branch Theme Updater** connects one theme folder on your site to any GitHub repository. When the branch you chose has a new commit, WordPress offers the update in **Dashboard → Updates** and under **Appearance → Themes**, the same way it does for a theme from WordPress.org.
+**Branch Theme/Plugin Updater** follows one GitHub branch and installs it as a theme or as a plugin. You choose which. When that branch gets a new commit, WordPress offers the update in **Dashboard → Updates**, the same way it offers a package from WordPress.org.
 
-The plugin does not ship with a theme, and it does not point at a repository until you choose one. A new install is empty.
+A new install is empty. Nothing is selected until you save a repository.
 
-= What it is for =
+= A theme, or a plugin =
 
-* A theme you develop in Git and deploy by pushing a branch.
-* A private theme repository that should update without FTP or a manual zip upload.
-* A public GitHub theme that is not distributed through the WordPress.org theme directory.
+**Theme.** Set the folder name inside `wp-content/themes/`. You can pick a theme that is already installed, or type the slug of one that is not on the site yet. Updates also appear under **Appearance → Themes**.
 
-= What you configure =
+**Plugin.** Set the main file as `folder/file.php` inside `wp-content/plugins/`. That file needs a Plugin Name header, and it must sit in the repository root or in a folder directly under the root. Updates also appear under **Plugins**. An active plugin stays active when the folder and the main file keep the same names.
 
-1. The GitHub URL, or the owner, repository name, and branch.
-2. The theme folder name inside `wp-content/themes/`. You can pick an installed theme or type the slug of a theme that is not on the site yet.
-3. A personal access token, only if the repository is private.
+One site tracks one package. A site already set to a theme keeps that theme until you change the setting and save.
 
-Public repositories work with no token. Save the settings once and WordPress takes it from there.
+= Put it on the site once =
 
-= How an update is detected =
+**Dashboard → Updates** lists a theme or a plugin only after it is already installed.
 
-The plugin does **not** require GitHub Releases, tags, or a changing version number in `style.css`.
+1. Choose **Theme** or **Plugin**.
+2. Paste a repository URL such as `https://github.com/owner/repo` or `https://github.com/owner/repo/tree/main`, then save. Owner, repository, and branch are filled from that URL.
+3. Use **Show available branches** to confirm GitHub returned the branch.
+4. Use **Force install branch** if the package is not on the site yet. It asks before it replaces the folder, and it moves the current folder aside until the new copy is in place.
 
-On each update check it asks GitHub for the latest commit on the branch you selected and compares that commit with the commit recorded the last time this theme was installed. If they differ, WordPress is offered a package built from that branch. The version it shows keeps the version already written in the theme and adds the short commit id, for example `1.4.2+git.a1b2c3d`. That is enough for WordPress to treat the branch tip as a newer package even when the theme author did not bump `Version`.
+Later commits arrive as normal updates. **Force install branch** will not replace Branch Theme/Plugin Updater itself. Update this plugin from **Dashboard → Updates**.
 
-After a successful update, the plugin stores the new commit id. The next check stays quiet until the branch moves again.
+= How a new commit becomes an update =
 
-= What happens to the theme folder =
+No GitHub Release, no tag, and no version bump is required.
 
-A GitHub zip is extracted into a folder named like `owner-repo-commit`. Before WordPress validates the package, the plugin renames that folder to the theme slug you configured, so the update replaces `wp-content/themes/your-theme` instead of leaving a second copy on disk.
+On each check the plugin reads the latest commit on your branch and compares it with the commit stored at the last install. If they differ, WordPress is offered a zip of that branch. The version on the updates screen keeps the version in `style.css` or the plugin header and adds the short commit id, for example `1.4.2+git.a1b2c3d`.
 
-The theme’s existing directory can be overwritten. Use a branch you are willing to deploy. The manual install tool asks for confirmation before it replaces the folder, and it moves the current folder aside until the new copy is in place.
+After a successful update the plugin stores the new commit id. The next check stays quiet until the branch moves again.
+
+GitHub names the extracted folder `owner-repo` plus a commit id. Before WordPress validates the package, this plugin renames that folder to your theme slug or plugin folder, so the update replaces the directory you configured.
 
 = Public and private repositories =
 
-* **Public.** Leave the token empty. GitHub’s API is enough to read the branch and download the zip.
-* **Private.** Create a personal access token with read access to that repository’s contents. A fine-grained token limited to the one repository is the right scope. Classic tokens need the `repo` scope.
+* **Public.** Leave the token empty.
+* **Private.** Create a personal access token that can read the repository contents. A fine-grained token limited to that one repository is enough. Classic tokens need the `repo` scope.
 
-The token is stored in the WordPress database. After you save it, the settings page does not print it back into the form. Leave the field blank to keep the saved token, or tick **Remove saved token** to delete it. The token is sent only to GitHub, and only when the plugin reads the repository or downloads the theme.
+The token is stored in the WordPress database. After you save it, the settings page does not print it back into the form. Leave the field blank to keep the saved token, or tick **Remove saved token** to delete it. The token is sent only to GitHub, and only when the plugin reads the repository or downloads the zip.
 
-= Tools on the settings page =
+= On the settings page =
 
-* **Clear cache** drops the cached commit id so the next check talks to GitHub again.
-* **Show available branches** lists the branches your account can see and reports whether the repository is private.
-* **Force install branch** downloads the selected branch and replaces the theme folder. Use it for the first install, or when you want the branch on disk without waiting for the update screen. It asks you to confirm first.
+The page opens with the two choices, **Theme** and **Plugin**. The form then shows the folder field for a theme, or the `folder/file.php` field for a plugin.
 
-The native update screen only offers an update when that theme folder already exists. To put a theme on the site for the first time, use **Force install branch** or upload it once yourself, then let later commits arrive as normal updates.
+* **Clear cache** drops the cached commit id so the next check talks to GitHub again. The commit id is cached for 15 minutes.
+* **Show available branches** lists the branch names GitHub returned and reports whether the repository is private.
+* **Force install branch** downloads the selected branch and replaces the theme folder or the plugin folder.
 
 = What this plugin does not do =
 
-* It updates one theme per site, not every theme, and not plugins.
-* It follows the tip of a branch. It does not present a list of GitHub Releases to roll back to.
-* It does not edit `style.css` or keep a version number of its own inside the theme.
-* It does not call the plugin author, and it does not send the site URL, user list, or content anywhere except to GitHub’s API for the repository you configured.
-* It does not create the theme’s Git repository. You push the theme to GitHub yourself.
+* It does not update every theme and every plugin. One package per site.
+* It follows the tip of a branch. It does not list GitHub Releases you can roll back to.
+* It does not edit `style.css` or a plugin header.
+* It does not send posts, users, comments, or the site URL anywhere except to GitHub, for the repository you configured.
+* It does not create the Git repository. You push the theme or plugin yourself.
 
 = Requirements =
 
 * WordPress 5.8 or newer.
 * PHP 7.4 or newer.
-* The PHP `ZipArchive` extension, which is what WordPress uses to unpack theme packages.
-* A theme directory WordPress can write to (`wp-content/themes`).
+* The PHP `ZipArchive` extension, which is what WordPress uses to unpack packages.
+* A writable `wp-content/themes` or `wp-content/plugins` directory.
 * For a private repository, a GitHub token that can read that repository.
 
 == Installation ==
 
 1. Upload the `branch-theme-updater` folder to `/wp-content/plugins/`, or install the zip from **Plugins → Add New → Upload Plugin**.
-2. Activate **Branch Theme Updater**.
-3. Open **Settings → Branch Theme Updater**.
-4. Paste a repository URL such as `https://github.com/owner/repo` or `https://github.com/owner/repo/tree/main`. Owner, repository, and branch are filled from that URL when you save.
-5. Set **Theme slug** to the folder name in `wp-content/themes/`.
-6. For a private repository, add a personal access token and save again.
-7. Use **Show available branches** to confirm the token can see the repository, then **Force install branch** if the theme is not already on the site.
+2. Activate **Branch Theme/Plugin Updater**.
+3. Open **Settings → Branch Theme/Plugin Updater**.
+4. Choose **Theme** or **Plugin**.
+5. Paste a repository URL such as `https://github.com/owner/repo` or `https://github.com/owner/repo/tree/main`.
+6. For a theme, set **Theme slug** to the folder in `wp-content/themes/`. For a plugin, set **Plugin file** to `folder/file.php`.
+7. For a private repository, add a personal access token and save again.
+8. Use **Show available branches**, then **Force install branch** if the theme or plugin is not already on the site.
 
 Later updates appear on the WordPress updates screen.
 
 == Frequently Asked Questions ==
 
-= Does the plugin update a specific theme for me? =
+= Can it update a plugin? =
 
-No. Each site chooses its own theme folder and GitHub repository. Nothing is selected until you save the settings.
+Yes. Choose **Plugin** and enter the main file as `folder/file.php`. The file needs a Plugin Name header and must be in the repository root, or in a folder directly inside it. Install the branch once with **Force install branch**. Later commits show up on **Dashboard → Updates** and under **Plugins**. The button will not overwrite Branch Theme/Plugin Updater itself.
 
-= Can I track more than one theme? =
+= Can it update a theme? =
 
-One theme at a time. The settings page stores a single repository and a single theme slug.
+Yes. Choose **Theme** and enter the folder name in `wp-content/themes/`. Install the branch once, then later commits show up on **Dashboard → Updates** and under **Appearance → Themes**. A site that was already configured for a theme stays on that theme.
 
-= Can I use it for a plugin instead of a theme? =
+= Can I track a theme and a plugin at the same time? =
 
-No. It hooks the theme update system only.
+No. The settings store one repository and either one theme slug or one plugin file. Change the choice when you want the other.
 
 = Do I need a token for a public repository? =
 
@@ -107,7 +109,7 @@ No. Add a token only when GitHub would refuse the request, which is the case for
 
 = Which token permissions are required? =
 
-Read access to repository contents. Prefer a fine-grained personal access token that can read only the theme repository. You can create one at [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new).
+Read access to repository contents. Prefer a fine-grained personal access token that can read only that repository. You can create one at [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new).
 
 = Where is the token stored? =
 
@@ -115,37 +117,37 @@ In the `gtu_settings` option in the WordPress database. Administrators who can m
 
 = Why does the offered version look like 1.2.0+git.abc1234? =
 
-The plugin keeps the version written in `style.css` and appends the short commit id. WordPress can then see that the branch moved even when the theme’s own version number did not change.
+The plugin keeps the version written in `style.css` or the plugin header and appends the short commit id. WordPress can then see that the branch moved even when that version number did not change.
 
-= The theme version in style.css did not change. Will I still be notified? =
+= The version header did not change. Will I still be notified? =
 
 Yes. The comparison is the commit on the branch, not the version header.
 
-= The update screen says the theme does not exist. =
+= The update screen does not list my theme or plugin. =
 
-The automatic update is offered only after the folder `wp-content/themes/{slug}` exists. Install the branch once with **Force install branch**, or upload the theme yourself. Check that the slug matches the directory name exactly.
+The automatic update is offered only after the theme folder or the plugin is already installed. Install the branch once with **Force install branch**, or upload the package yourself. The slug, or `folder/file.php`, has to match the directory name exactly.
 
 = GitHub extracted a folder I do not recognize. =
 
-That is the zipball name (`owner-repo` plus a commit id). The plugin renames it to your theme slug during install. If a rename is ever left behind, compare the folder with the slug on the settings page before deleting anything.
+That is the zipball name (`owner-repo` plus a commit id). The plugin renames it to your theme slug or plugin folder during install. If a rename is ever left behind, compare the folder with the settings page before deleting anything.
 
 = Which branch is used? =
 
-The branch saved in the settings. `main` is the default when the field is empty. **Show available branches** lists the names GitHub returned. A tag or commit id can be used in the branch field if you need a fixed revision instead of a moving branch tip.
+The branch saved in the settings. `main` is the default when the field is empty. **Show available branches** lists the names GitHub returned. A tag or a commit id can be used in the branch field when you want a fixed revision instead of the moving branch tip.
 
-= Does uninstall remove the token and the theme? =
+= Does uninstall remove the token and the package I was updating? =
 
-Uninstalling the plugin deletes its settings, the stored commit ids, and its cached GitHub responses. It does not delete the theme, and it does not revoke the token on GitHub. Revoke a token you no longer want from the GitHub token settings.
+Uninstalling this plugin deletes its settings, the stored commit ids, and its cached GitHub responses. It does not delete the theme or plugin you were updating, and it does not revoke the token on GitHub. Revoke a token you no longer want from the GitHub token settings.
 
 = Does it work on Multisite? =
 
-Settings are stored per site. Each site chooses its own repository. The plugin has not been written as a network-only admin screen.
+Settings are stored per site. Each site chooses its own repository and its own theme or plugin. The plugin has not been written as a network-only admin screen.
 
 == External services ==
 
 This plugin connects to GitHub in order to do the job you configured.
 
-It calls the GitHub API at `api.github.com` to read the repository, list branches, and read the latest commit on the selected branch. It downloads the theme zip from GitHub’s package host, `codeload.github.com`.
+It calls the GitHub API at `api.github.com` to read the repository, list branches, and read the latest commit on the selected branch. It downloads the zip from GitHub’s package host, `codeload.github.com`.
 
 Each request includes the repository owner, name, and branch saved in the plugin settings. If you saved a personal access token, the plugin sends it to GitHub in the `Authorization` header. A normal browser User-Agent is sent as well, or the User-Agent you typed in the settings. The plugin does not send posts, users, comments, or other site content.
 
@@ -154,6 +156,11 @@ Requests happen when WordPress checks for updates, when you open the diagnostic 
 GitHub privacy statement: [https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement)
 
 == Changelog ==
+
+= 1.2.0 =
+* Update one plugin from a branch, using the same commit check already used for themes.
+* Choose theme or plugin on the settings page. The form shows the field that matches that choice. Existing setups stay on the theme.
+* Install a plugin for the first time with Force install branch. Later commits use the WordPress updates screen.
 
 = 1.1.0 =
 * Start from an empty configuration so any theme and any GitHub repository can be used.

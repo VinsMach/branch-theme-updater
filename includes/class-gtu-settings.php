@@ -27,8 +27,8 @@ class GTU_Settings {
 
     public function add_menu(): void {
         add_options_page(
-            __( 'Branch Theme Updater', 'branch-theme-updater' ),
-            __( 'Branch Theme Updater', 'branch-theme-updater' ),
+            __( 'Branch Theme/Plugin Updater', 'branch-theme-updater' ),
+            __( 'Branch Theme/Plugin Updater', 'branch-theme-updater' ),
             'manage_options',
             'branch-theme-updater',
             [ $this, 'render_page' ]
@@ -41,17 +41,29 @@ class GTU_Settings {
         add_settings_section( 'gtu_main', __( 'Configurazione repository', 'branch-theme-updater' ), '__return_false', 'branch-theme-updater' );
 
         $fields = [
-            'repo_url'    => __( 'URL del repository', 'branch-theme-updater' ),
-            'theme_slug'    => __( 'Slug del tema', 'branch-theme-updater' ),
-            'repo_owner'  => __( 'Owner (utente / organizzazione)', 'branch-theme-updater' ),
-            'repo_name'   => __( 'Nome del repository', 'branch-theme-updater' ),
-            'repo_branch' => __( 'Branch da sincronizzare', 'branch-theme-updater' ),
-            'repo_token'  => __( 'Personal Access Token', 'branch-theme-updater' ),
-            'user_agent'    => __( 'User-Agent (il tuo username)', 'branch-theme-updater' ),
+            'package_type' => __( 'Cosa aggiornare', 'branch-theme-updater' ),
+            'repo_url'     => __( 'URL del repository', 'branch-theme-updater' ),
+            'theme_slug'   => __( 'Slug del tema', 'branch-theme-updater' ),
+            'plugin_file'  => __( 'File del plugin', 'branch-theme-updater' ),
+            'repo_owner'   => __( 'Owner (utente / organizzazione)', 'branch-theme-updater' ),
+            'repo_name'    => __( 'Nome del repository', 'branch-theme-updater' ),
+            'repo_branch'  => __( 'Branch da sincronizzare', 'branch-theme-updater' ),
+            'repo_token'   => __( 'Personal Access Token', 'branch-theme-updater' ),
+            'user_agent'   => __( 'User-Agent (il tuo username)', 'branch-theme-updater' ),
         ];
 
         foreach ( $fields as $key => $label ) {
-            add_settings_field( 'gtu_' . $key, $label, [ $this, 'render_field' ], 'branch-theme-updater', 'gtu_main', [ 'key' => $key ] );
+            add_settings_field(
+                'gtu_' . $key,
+                $label,
+                [ $this, 'render_field' ],
+                'branch-theme-updater',
+                'gtu_main',
+                [
+                    'key'   => $key,
+                    'class' => 'gtu-field-' . $key,
+                ]
+            );
         }
     }
 
@@ -65,6 +77,11 @@ class GTU_Settings {
         foreach ( [ 'repo_url', 'theme_slug', 'repo_owner', 'repo_name', 'repo_branch', 'repo_token', 'user_agent' ] as $k ) {
             $clean[ $k ] = isset( $input[ $k ] ) ? sanitize_text_field( $input[ $k ] ) : '';
         }
+
+        $clean['package_type'] = ( isset( $input['package_type'] ) && 'plugin' === $input['package_type'] ) ? 'plugin' : 'theme';
+        $clean['plugin_file']  = gtu_plugin_file( [
+            'plugin_file' => isset( $input['plugin_file'] ) ? sanitize_text_field( $input['plugin_file'] ) : '',
+        ] );
 
         if ( '' === $clean['repo_token'] && empty( $input['clear_repo_token'] ) ) {
             $clean['repo_token'] = isset( $old['repo_token'] ) ? sanitize_text_field( (string) $old['repo_token'] ) : '';
@@ -135,8 +152,10 @@ class GTU_Settings {
         $value   = $options[ $key ] ?? '';
 
         $descriptions = [
-            'repo_url'    => __( 'Incolla un URL tipo <code>https://github.com/owner/repo</code> oppure <code>https://github.com/owner/repo/tree/branch</code>. Se lo cambi, owner, repository e branch vengono compilati da lì.', 'branch-theme-updater' ),
-            'theme_slug'    => __( 'Cartella del tema in <code>wp-content/themes/</code>. Puoi scegliere un tema già installato o scrivere lo slug di uno nuovo.', 'branch-theme-updater' ),
+            'package_type' => __( 'Il sito segue una sola scelta. Puoi cambiare da tema a plugin quando vuoi: gli aggiornamenti useranno solo quella.', 'branch-theme-updater' ),
+            'repo_url'     => __( 'Incolla un URL tipo <code>https://github.com/owner/repo</code> oppure <code>https://github.com/owner/repo/tree/branch</code>. Se lo cambi, owner, repository e branch vengono compilati da lì.', 'branch-theme-updater' ),
+            'theme_slug'   => __( 'Usato quando aggiorni un tema. Cartella in <code>wp-content/themes/</code>. Puoi scegliere un tema già installato o scrivere lo slug di uno nuovo.', 'branch-theme-updater' ),
+            'plugin_file'  => __( 'Usato quando aggiorni un plugin. Percorso <code>cartella/file.php</code> in <code>wp-content/plugins/</code>. Il repository deve contenere quel file, con l’header Plugin Name.', 'branch-theme-updater' ),
             'repo_owner'  => __( 'Utente o organizzazione, per esempio <code>octocat</code>.', 'branch-theme-updater' ),
             'repo_name'   => __( 'Nome del repository, per esempio <code>my-theme</code>.', 'branch-theme-updater' ),
             'repo_branch' => __( 'Branch da installare, per esempio <code>main</code>.', 'branch-theme-updater' ),
@@ -148,7 +167,18 @@ class GTU_Settings {
             'user_agent'    => __( 'Opzionale. Se vuoto, il plugin invia un User-Agent generico.', 'branch-theme-updater' ),
         ];
 
-        if ( 'repo_token' === $key ) {
+        if ( 'package_type' === $key ) {
+            echo '<select name="' . esc_attr( GTU_OPTION_KEY ) . '[package_type]">';
+            foreach ( [ 'theme' => __( 'Tema', 'branch-theme-updater' ), 'plugin' => __( 'Plugin', 'branch-theme-updater' ) ] as $choice => $label ) {
+                printf(
+                    '<option value="%1$s" %2$s>%3$s</option>',
+                    esc_attr( $choice ),
+                    selected( $value, $choice, false ),
+                    esc_html( $label )
+                );
+            }
+            echo '</select>';
+        } elseif ( 'repo_token' === $key ) {
             $has_token = '' !== $value;
             printf(
                 '<input type="password" name="%1$s[repo_token]" value="" class="regular-text" autocomplete="new-password" placeholder="%2$s">',
@@ -168,7 +198,7 @@ class GTU_Settings {
                 esc_attr( GTU_OPTION_KEY ),
                 esc_attr( $key ),
                 esc_attr( $value ),
-                'theme_slug' === $key ? ' list="gtu-installed-themes"' : ''
+                'theme_slug' === $key ? ' list="gtu-installed-themes"' : ( 'plugin_file' === $key ? ' list="gtu-installed-plugins"' : '' )
             );
         }
 
@@ -179,6 +209,21 @@ class GTU_Settings {
                     '<option value="%s">%s</option>',
                     esc_attr( $slug ),
                     esc_attr( $theme->get( 'Name' ) )
+                );
+            }
+            echo '</datalist>';
+        }
+
+        if ( 'plugin_file' === $key ) {
+            if ( ! function_exists( 'get_plugins' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+            echo '<datalist id="gtu-installed-plugins">';
+            foreach ( get_plugins() as $file => $plugin ) {
+                printf(
+                    '<option value="%s">%s</option>',
+                    esc_attr( $file ),
+                    esc_attr( $plugin['Name'] ?? $file )
                 );
             }
             echo '</datalist>';
@@ -199,11 +244,27 @@ class GTU_Settings {
         <div class="wrap gtu-wrap">
             <h1>
                 <span class="dashicons dashicons-update" style="vertical-align:middle;margin-right:6px;"></span>
-                <?php esc_html_e( 'Branch Theme Updater', 'branch-theme-updater' ); ?>
+                <?php esc_html_e( 'Branch Theme/Plugin Updater', 'branch-theme-updater' ); ?>
             </h1>
-            <p>
-                <?php esc_html_e( 'Collega la cartella di un tema a un repository remoto. WordPress proporrà gli aggiornamenti da quel branch. Il token serve solo se il repository è privato.', 'branch-theme-updater' ); ?>
+            <p class="gtu-lead">
+                <?php esc_html_e( 'Tieni un tema o un plugin allineato a un branch. WordPress propone l’aggiornamento in Bacheca → Aggiornamenti, come per un pacchetto di WordPress.org.', 'branch-theme-updater' ); ?>
             </p>
+            <div class="gtu-paths">
+                <div class="gtu-path<?php echo 'theme' === gtu_package_type( $opts ) ? ' is-current' : ''; ?>" data-gtu-path="theme">
+                    <strong><?php esc_html_e( 'Tema', 'branch-theme-updater' ); ?></strong>
+                    <p><?php esc_html_e( 'La cartella in wp-content/themes. Gli aggiornamenti compaiono in Aspetto → Temi.', 'branch-theme-updater' ); ?></p>
+                </div>
+                <div class="gtu-path<?php echo 'plugin' === gtu_package_type( $opts ) ? ' is-current' : ''; ?>" data-gtu-path="plugin">
+                    <strong><?php esc_html_e( 'Plugin', 'branch-theme-updater' ); ?></strong>
+                    <p><?php esc_html_e( 'Il file cartella/file.php in wp-content/plugins. Gli aggiornamenti compaiono in Plugin. Un plugin attivo resta attivo se cartella e file non cambiano nome.', 'branch-theme-updater' ); ?></p>
+                </div>
+            </div>
+            <ol class="gtu-steps">
+                <li><?php esc_html_e( 'Scegli tema o plugin.', 'branch-theme-updater' ); ?></li>
+                <li><?php esc_html_e( 'Incolla l’URL del repository e salva.', 'branch-theme-updater' ); ?></li>
+                <li><?php esc_html_e( 'Installa il branch una volta, se non è già sul sito.', 'branch-theme-updater' ); ?></li>
+                <li><?php esc_html_e( 'I commit successivi arrivano dalla schermata Aggiornamenti.', 'branch-theme-updater' ); ?></li>
+            </ol>
 
             <div class="gtu-status-box">
                 <?php $this->render_status( $opts ); ?>
@@ -219,6 +280,9 @@ class GTU_Settings {
 
             <hr>
             <h2><?php esc_html_e( 'Strumenti', 'branch-theme-updater' ); ?></h2>
+            <p class="description">
+                <?php esc_html_e( 'La schermata Aggiornamenti elenca solo un tema o un plugin già presente sul sito. Per la prima copia usa Forza installazione branch: chiede conferma e sostituisce la cartella del tipo che hai scelto. Non sostituisce questo plugin.', 'branch-theme-updater' ); ?>
+            </p>
             <p>
                 <button class="button" id="gtu-clear-cache">
                     <?php esc_html_e( 'Svuota cache', 'branch-theme-updater' ); ?>
@@ -291,9 +355,48 @@ class GTU_Settings {
                 ajaxCall( 'gtu_diagnose', nonces.diag, this, '🔍 Mostra branch disponibili' );
             });
 
+            var typeField = document.querySelector('[name="<?php echo esc_js( GTU_OPTION_KEY ); ?>[package_type]"]');
+
+            function syncPackageType() {
+                if ( ! typeField ) {
+                    return;
+                }
+                var type = typeField.value === 'plugin' ? 'plugin' : 'theme';
+                var themeRow = document.querySelector('.gtu-field-theme_slug');
+                var pluginRow = document.querySelector('.gtu-field-plugin_file');
+                if ( themeRow ) {
+                    themeRow.style.display = type === 'theme' ? '' : 'none';
+                }
+                if ( pluginRow ) {
+                    pluginRow.style.display = type === 'plugin' ? '' : 'none';
+                }
+                document.querySelectorAll('[data-gtu-path]').forEach(function(card) {
+                    card.classList.toggle('is-current', card.getAttribute('data-gtu-path') === type);
+                });
+            }
+
+            if ( typeField ) {
+                typeField.addEventListener('change', syncPackageType);
+                syncPackageType();
+            }
+
+            document.querySelectorAll('[data-gtu-path]').forEach(function(card) {
+                card.addEventListener('click', function() {
+                    if ( ! typeField ) {
+                        return;
+                    }
+                    typeField.value = card.getAttribute('data-gtu-path');
+                    syncPackageType();
+                });
+            });
+
             document.getElementById('gtu-force-install').addEventListener('click', function(e) {
                 e.preventDefault();
-                if ( ! window.confirm( '<?php echo esc_js( __( 'Sostituire la cartella del tema con il branch selezionato?', 'branch-theme-updater' ) ); ?>' ) ) {
+                var replacingPlugin = typeField && typeField.value === 'plugin';
+                var message = replacingPlugin
+                    ? '<?php echo esc_js( __( 'Sostituire la cartella del plugin con il branch selezionato?', 'branch-theme-updater' ) ); ?>'
+                    : '<?php echo esc_js( __( 'Sostituire la cartella del tema con il branch selezionato?', 'branch-theme-updater' ) ); ?>';
+                if ( ! window.confirm( message ) ) {
                     return;
                 }
                 ajaxCall( 'gtu_force_install', nonces.install, this, '⬇ Forza installazione branch' );
@@ -304,20 +407,33 @@ class GTU_Settings {
     }
 
     private function render_status( array $opts ): void {
-        $theme_slug = $opts['theme_slug'] ?? '';
-        if ( '' === $theme_slug || empty( $opts['repo_owner'] ) || empty( $opts['repo_name'] ) ) {
-            echo '<p>' . esc_html__( 'Nessun tema collegato. Incolla l’URL del repository, indica la cartella del tema e salva.', 'branch-theme-updater' ) . '</p>';
+        if ( ! gtu_target_ready( $opts ) ) {
+            echo '<p>' . esc_html__( 'Nessun collegamento. Sopra scegli Tema o Plugin, poi incolla l’URL del repository e salva.', 'branch-theme-updater' ) . '</p>';
             return;
         }
 
-        $theme      = wp_get_theme( $theme_slug );
-        $current    = $theme->exists() ? $theme->get( 'Version' ) : __( 'tema non trovato', 'branch-theme-updater' );
-        $stored_sha = get_option( 'gtu_installed_sha_' . $theme_slug, '—' );
+        if ( 'plugin' === gtu_package_type( $opts ) ) {
+            $plugin_file = gtu_plugin_file( $opts );
+            $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+            if ( ! function_exists( 'get_plugin_data' ) ) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+            $current = is_file( $plugin_path ) ? ( get_plugin_data( $plugin_path, false, false )['Version'] ?: '—' ) : __( 'plugin non trovato', 'branch-theme-updater' );
+            $label   = __( 'Plugin monitorato', 'branch-theme-updater' );
+            $target  = $plugin_file;
+        } else {
+            $target  = $opts['theme_slug'] ?? '';
+            $theme   = wp_get_theme( $target );
+            $current = $theme->exists() ? $theme->get( 'Version' ) : __( 'tema non trovato', 'branch-theme-updater' );
+            $label   = __( 'Tema monitorato', 'branch-theme-updater' );
+        }
+
+        $stored_sha = get_option( 'gtu_installed_sha_' . gtu_target_id( $opts ), '—' );
 
         echo '<table class="gtu-table">';
-        printf( '<tr><th>%s</th><td><code>%s</code></td></tr>', esc_html__( 'Tema monitorato', 'branch-theme-updater' ), esc_html( $theme_slug ?: '—' ) );
+        printf( '<tr><th>%s</th><td><code>%s</code></td></tr>', esc_html( $label ), esc_html( $target ?: '—' ) );
         printf( '<tr><th>%s</th><td><code>%s</code></td></tr>', esc_html__( 'Versione installata', 'branch-theme-updater' ), esc_html( $current ) );
-        printf( '<tr><th>%s</th><td><code>%s</code></td></tr>', esc_html__( 'SHA installato', 'branch-theme-updater' ), esc_html( $stored_sha !== '—' ? substr( $stored_sha, 0, 7 ) : '—' ) );
+        printf( '<tr><th>%s</th><td><code>%s</code></td></tr>', esc_html__( 'SHA installato', 'branch-theme-updater' ), esc_html( '—' !== $stored_sha ? substr( $stored_sha, 0, 7 ) : '—' ) );
         printf( '<tr><th>%s</th><td><code>%s</code></td></tr>', esc_html__( 'Branch configurato', 'branch-theme-updater' ), esc_html( $opts['repo_branch'] ?? 'main' ) );
         echo '</table>';
     }
@@ -329,10 +445,10 @@ class GTU_Settings {
         }
 
         $opts = gtu_get_settings();
-        if ( empty( $opts['theme_slug'] ) || empty( $opts['repo_owner'] ) || empty( $opts['repo_name'] ) ) {
+        if ( ! gtu_target_ready( $opts ) ) {
             printf(
                 '<div class="notice notice-warning"><p>%s</p></div>',
-                esc_html__( 'Branch Theme Updater non è ancora collegato a un tema. Scegli repository e cartella, poi salva.', 'branch-theme-updater' )
+                esc_html__( 'Scegli Tema o Plugin, indica il repository e salva. Poi installa il branch una volta.', 'branch-theme-updater' )
             );
             return;
         }
@@ -351,10 +467,19 @@ class GTU_Settings {
         }
         wp_add_inline_style( 'wp-admin', '
             .gtu-wrap { max-width: 780px; }
+            .gtu-lead { font-size: 14px; max-width: 68ch; }
+            .gtu-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0 8px; }
+            .gtu-path { background: #fff; border: 1px solid #c3c4c7; border-radius: 4px; padding: 12px 14px; cursor: pointer; }
+            .gtu-path strong { display: block; margin-bottom: 4px; }
+            .gtu-path p { margin: 0; color: #50575e; }
+            .gtu-path.is-current { border-color: #2271b1; box-shadow: inset 3px 0 0 #2271b1; }
+            .gtu-steps { margin: 8px 0 16px 1.2em; }
+            .gtu-steps li { margin: 2px 0; }
             .gtu-status-box { background:#fff; border:1px solid #c3c4c7; border-radius:4px; padding:16px 20px; margin:20px 0; }
             .gtu-table { width:100%; border-collapse:collapse; }
             .gtu-table th { text-align:left; width:220px; padding:6px 0; color:#50575e; font-weight:600; }
             .gtu-table td { padding:6px 0; }
+            @media (max-width: 600px) { .gtu-paths { grid-template-columns: 1fr; } }
         ' );
     }
 }
@@ -565,6 +690,103 @@ function gtu_replace_theme_from_zip( string $zip_path, string $slug, array &$deb
     ];
 }
 
+function gtu_replace_plugin_from_zip( string $zip_path, string $plugin_file, array &$debug ) {
+    if ( ! class_exists( 'ZipArchive' ) ) {
+        return new WP_Error( 'gtu_no_ziparchive', 'Estensione PHP ZipArchive non disponibile.' );
+    }
+
+    $folder = gtu_plugin_folder( $plugin_file );
+    $main   = basename( $plugin_file );
+    if ( '' === $folder ) {
+        return new WP_Error( 'gtu_plugin_path', 'Indica il plugin come cartella/file.php.' );
+    }
+
+    $plugins_dir = WP_PLUGIN_DIR;
+    $fs          = gtu_filesystem();
+    if ( ! is_dir( $plugins_dir ) || ! $fs || ! $fs->is_writable( $plugins_dir ) ) {
+        return new WP_Error( 'gtu_plugin_root_not_writable', 'La cartella plugin non è scrivibile: ' . $plugins_dir );
+    }
+
+    $tmp_dir = trailingslashit( get_temp_dir() ) . 'gtu-unpack-' . $folder . '-' . time() . '-' . wp_rand( 1000, 9999 );
+    if ( ! wp_mkdir_p( $tmp_dir ) ) {
+        return new WP_Error( 'gtu_tmp_failed', 'Impossibile creare la cartella temporanea.' );
+    }
+
+    $zip    = new ZipArchive();
+    $opened = $zip->open( $zip_path );
+    if ( true !== $opened ) {
+        gtu_rrmdir( $tmp_dir );
+        return new WP_Error( 'gtu_zip_open_failed', 'Impossibile aprire lo zip del repository.' );
+    }
+
+    if ( ! $zip->extractTo( $tmp_dir ) ) {
+        $zip->close();
+        gtu_rrmdir( $tmp_dir );
+        return new WP_Error( 'gtu_zip_extract_failed', 'Impossibile estrarre lo zip del repository.' );
+    }
+    $zip->close();
+
+    $source = gtu_find_plugin_source_dir( $tmp_dir, $plugin_file );
+    if ( ! $source ) {
+        gtu_rrmdir( $tmp_dir );
+        return new WP_Error( 'gtu_not_plugin_zip', 'Lo zip non contiene il file ' . $main . ' nella cartella principale.' );
+    }
+
+    $header = get_file_data( trailingslashit( $source ) . $main, [ 'name' => 'Plugin Name', 'version' => 'Version' ] );
+    if ( empty( $header['name'] ) ) {
+        gtu_rrmdir( $tmp_dir );
+        return new WP_Error( 'gtu_invalid_plugin', $main . ' trovato, ma manca l\'header Plugin Name.' );
+    }
+
+    $target       = trailingslashit( $plugins_dir ) . $folder;
+    $backup       = trailingslashit( $plugins_dir ) . $folder . '.gtu-backup-' . time();
+    $had_existing = is_dir( $target );
+
+    if ( $had_existing && ! $fs->move( $target, $backup, true ) ) {
+        gtu_rrmdir( $tmp_dir );
+        return new WP_Error( 'gtu_backup_failed', 'Impossibile spostare temporaneamente il plugin esistente. Controlla permessi file/cartelle.' );
+    }
+
+    $moved = $fs->move( $source, $target, true );
+    if ( ! $moved ) {
+        $copied = gtu_copy_dir( $source, $target );
+        if ( ! $copied ) {
+            gtu_rrmdir( $target );
+            if ( $had_existing && is_dir( $backup ) ) {
+                $fs->move( $backup, $target, true );
+            }
+            gtu_rrmdir( $tmp_dir );
+            return new WP_Error(
+                'gtu_replace_failed',
+                'Impossibile copiare il nuovo plugin nella cartella finale. Controlla permessi, owner dei file e spazio disco in wp-content/plugins.'
+            );
+        }
+    }
+
+    if ( ! is_file( trailingslashit( $target ) . $main ) ) {
+        gtu_rrmdir( $target );
+        if ( $had_existing && is_dir( $backup ) ) {
+            $fs->move( $backup, $target, true );
+        }
+        gtu_rrmdir( $tmp_dir );
+        return new WP_Error( 'gtu_replace_validation_failed', 'Il plugin copiato non contiene ' . $main . ' nella cartella finale.' );
+    }
+
+    gtu_rrmdir( $tmp_dir );
+    $backup_removed = null;
+    if ( $had_existing && is_dir( $backup ) ) {
+        $backup_removed = gtu_rrmdir( $backup );
+    }
+
+    return [
+        'source_folder'  => basename( $source ),
+        'backup_removed' => $backup_removed,
+        'plugin_name'    => $header['name'] ?? '',
+        'plugin_version' => $header['version'] ?? '',
+        'install_method' => isset( $copied ) && $copied ? 'copy_dir' : 'move',
+    ];
+}
+
 // ─── AJAX handlers ────────────────────────────────────────────────────────────
 
 add_action( 'wp_ajax_gtu_clear_cache', function (): void {
@@ -625,24 +847,42 @@ add_action( 'wp_ajax_gtu_diagnose', function (): void {
 
 add_action( 'wp_ajax_gtu_force_install', function (): void {
     check_ajax_referer( 'gtu_force_install' );
-    if ( ! current_user_can( 'update_themes' ) ) {
+
+    $opts    = gtu_get_settings();
+    $type    = gtu_package_type( $opts );
+    $owner   = $opts['repo_owner']  ?? '';
+    $repo    = $opts['repo_name']   ?? '';
+    $slug    = $opts['theme_slug']  ?? '';
+    $plugin  = gtu_plugin_file( $opts );
+    $branch  = $opts['repo_branch'] ?? 'main';
+    $cap     = 'plugin' === $type ? 'install_plugins' : 'update_themes';
+
+    if ( ! current_user_can( $cap ) ) {
         wp_send_json_error( [ 'message' => 'Permessi insufficienti.' ] );
     }
 
-    $opts   = gtu_get_settings();
-    $owner  = $opts['repo_owner']  ?? '';
-    $repo   = $opts['repo_name']   ?? '';
-    $slug   = $opts['theme_slug']    ?? '';
-    $branch = $opts['repo_branch'] ?? 'main';
-
-    if ( '' === $owner || '' === $repo || '' === $slug ) {
+    if ( 'plugin' === $type ) {
+        if ( '' === $owner || '' === $repo || '' === $plugin ) {
+            wp_send_json_error( [
+                'raw_error' => 'Configura plugin, owner e repository prima di installare. Il plugin va indicato come cartella/file.php.',
+            ] );
+        }
+        if ( gtu_is_this_plugin( $plugin ) ) {
+            wp_send_json_error( [
+                'raw_error' => 'Questo plugin non può sostituire i propri file da qui. Usa la schermata Aggiornamenti.',
+            ] );
+        }
+        $target_id = gtu_plugin_folder( $plugin );
+    } elseif ( '' === $owner || '' === $repo || '' === $slug ) {
         wp_send_json_error( [
             'raw_error' => 'Configura tema, owner e repository prima di installare.',
         ] );
+    } else {
+        $target_id = $slug;
     }
 
     $package_url = gtu_remote_api( $owner, $repo, 'zipball/' . rawurlencode( $branch ) );
-    $zip_path    = get_temp_dir() . 'gtu-' . $slug . '-' . time() . '.zip';
+    $zip_path    = get_temp_dir() . 'gtu-' . sanitize_file_name( $target_id ) . '-' . time() . '.zip';
 
     $debug = [
         'package_url' => $package_url,
@@ -703,34 +943,36 @@ add_action( 'wp_ajax_gtu_force_install', function (): void {
     $debug['download_url'] = $fetched['download_url'];
     $debug['zip_size_kb']  = round( $fetched['bytes'] / 1024, 1 );
 
-    // Installa dal file locale con sostituzione della cartella tema.
-    // Theme_Upgrader::install() su alcuni WordPress non sovrascrive davvero la
-    // cartella esistente e restituisce solo "Il pacchetto non può essere installato".
-    $result = gtu_replace_theme_from_zip( $zip_path, $slug, $debug );
+    $result = 'plugin' === $type
+        ? gtu_replace_plugin_from_zip( $zip_path, $plugin, $debug )
+        : gtu_replace_theme_from_zip( $zip_path, $slug, $debug );
     wp_delete_file( $zip_path );
 
     if ( is_wp_error( $result ) ) {
         $debug['install'] = [
-            'result'       => $result->get_error_message(),
-            'error_code'   => $result->get_error_code(),
-            'theme_exists' => is_dir( get_theme_root() . '/' . $slug ),
+            'result'     => $result->get_error_message(),
+            'error_code' => $result->get_error_code(),
+            'exists'     => 'plugin' === $type
+                ? is_dir( WP_PLUGIN_DIR . '/' . gtu_plugin_folder( $plugin ) )
+                : is_dir( get_theme_root() . '/' . $slug ),
         ];
         wp_send_json_error( $debug );
     }
 
-    // Salva SHA installato
     $updater = GTU_Updater::get_instance();
-    $sha = $updater->fetch_branch_sha( $opts, $branch );
+    $sha     = $updater->remember_sha( $opts );
     if ( $sha ) {
-        update_option( 'gtu_installed_sha_' . $slug, $sha );
         $debug['installed_sha'] = substr( $sha, 0, 7 );
     }
 
     $debug['install'] = [
         'result'          => 'ok',
         'method'          => 'manual_replace',
+        'package_type'    => $type,
         'source_folder'   => $result['source_folder'] ?? null,
-        'theme_exists'    => is_dir( get_theme_root() . '/' . $slug ),
+        'exists'          => 'plugin' === $type
+            ? is_dir( WP_PLUGIN_DIR . '/' . gtu_plugin_folder( $plugin ) )
+            : is_dir( get_theme_root() . '/' . $slug ),
         'previous_backup' => $result['backup_removed'] ?? null,
     ];
 
